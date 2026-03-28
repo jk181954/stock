@@ -1,76 +1,42 @@
-async function loadStocks() {
-  const response = await fetch('stocks.json');
-  if (!response.ok) {
-    throw new Error('無法讀取 stocks.json');
-  }
-  return await response.json();
-}
-
-function matchStrategy(stock) {
-  return (
-    stock.close > stock.ma5 &&
-    stock.close > stock.ma20 &&
-    stock.close > stock.ma60 &&
-    stock.lowestClose20 < stock.ma20 &&
-    stock.volume > 500 &&
-    stock.close < stock.ma200 * 1.4 &&
-    stock.ma200_up_10days === true
-  );
-}
-
-function renderResults(results) {
-  const tbody = document.getElementById('resultBody');
-  const count = document.getElementById('resultCount');
-
-  if (results.length === 0) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="9" class="empty">沒有符合條件的股票</td>
-      </tr>
-    `;
-    count.textContent = '0 檔';
-    return;
-  }
-
-  tbody.innerHTML = results.map(stock => `
-    <tr>
-      <td>${stock.code}</td>
-      <td>${stock.name}</td>
-      <td>${stock.close}</td>
-      <td>${stock.ma5}</td>
-      <td>${stock.ma20}</td>
-      <td>${stock.ma60}</td>
-      <td>${stock.ma200}</td>
-      <td>${stock.lowestClose20}</td>
-      <td>${stock.volume}</td>
-    </tr>
-  `).join('');
-
-  count.textContent = `共 ${results.length} 檔`;
-}
+// 注意：等 Render 架好後，把這裡換成你真實的 Render 網址
+const API_URL = 'https://你的-render-app名稱.onrender.com/stocks';
 
 async function runStrategy() {
   const tbody = document.getElementById('resultBody');
-  const count = document.getElementById('resultCount');
+  const status = document.getElementById('status');
+  
+  status.textContent = "資料讀取中，Render 免費版如果很久沒用，大約需要等 30~50 秒喚醒...";
+  tbody.innerHTML = `<tr><td colspan="7">讀取中...</td></tr>`;
 
   try {
-    count.textContent = '執行中...';
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="9" class="empty">資料讀取中...</td>
-      </tr>
-    `;
+    const response = await fetch(API_URL);
+    if (!response.ok) throw new Error('伺服器回應錯誤');
+    
+    const stocks = await response.json();
+    
+    if (stocks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7">今日無符合條件的股票</td></tr>`;
+      status.textContent = "讀取完成";
+      return;
+    }
 
-    const stocks = await loadStocks();
-    const results = stocks.filter(matchStrategy);
-    renderResults(results);
-  } catch (error) {
-    tbody.innerHTML = `
+    tbody.innerHTML = stocks.map(stock => `
       <tr>
-        <td colspan="9" class="empty">發生錯誤：${error.message}</td>
+        <td>${stock.code}</td>
+        <td>${stock.name}</td>
+        <td>${stock.close}</td>
+        <td>${stock.ma5}</td>
+        <td>${stock.ma20}</td>
+        <td>${stock.ma60}</td>
+        <td>${stock.volume}</td>
       </tr>
-    `;
-    count.textContent = '錯誤';
+    `).join('');
+    
+    status.textContent = `讀取完成，共找到 ${stocks.length} 檔`;
+    
+  } catch (error) {
+    status.textContent = `發生錯誤：${error.message}`;
+    tbody.innerHTML = `<tr><td colspan="7">讀取失敗</td></tr>`;
   }
 }
 
