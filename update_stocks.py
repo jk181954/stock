@@ -37,7 +37,6 @@ def fetch_all_stock_list():
                     seen_codes.add(code)
     except Exception as e:
         print(f"上櫃清單失敗: {e}")
-
     return stocks
 
 def fetch_stock_data_with_retry(stock_id, start_date, max_retries=3):
@@ -50,9 +49,10 @@ def fetch_stock_data_with_retry(stock_id, start_date, max_retries=3):
                 data = res.json().get("data", [])
                 return sorted(data, key=lambda x: x["date"])
             elif res.status_code in [429, 403]:
-                time.sleep(5)
+                # 被嫌太快了，休息3秒再試
+                time.sleep(3)
         except Exception:
-            time.sleep(2)
+            time.sleep(1)
     return []
 
 def moving_average(values, period):
@@ -76,10 +76,8 @@ def is_ma200_up_10days(closes):
         if ma_values[i] <= ma_values[i - 1]: return False
     return True
 
-# 不再做過濾，只負責計算並回傳所有資料
 def process_stock(stock_rows, stock_info):
     if len(stock_rows) < 220: return None
-    
     closes, volumes = [], []
     for row in stock_rows:
         try:
@@ -87,9 +85,7 @@ def process_stock(stock_rows, stock_info):
             volumes.append(float(row["Trading_Volume"]))
         except:
             continue
-
     if len(closes) < 220 or len(volumes) < 220: return None
-
     close = closes[-1]
     ma5 = moving_average(closes, 5)
     ma20 = moving_average(closes, 20)
@@ -98,9 +94,8 @@ def process_stock(stock_rows, stock_info):
     lowest_close_20 = min(closes[-20:])
     volume = volumes[-1] / 1000
     ma200_up_10days = is_ma200_up_10days(closes)
-
     if None in [ma5, ma20, ma60, ma200]: return None
-
+    
     return {
         "code": stock_info["code"],
         "name": stock_info["name"],
@@ -122,7 +117,7 @@ def main():
         print("無法取得股票清單")
         return
 
-    print(f"共取得 {len(stocks)} 檔普通股。開始計算技術指標 (約需 30 分鐘)...")
+    print(f"共取得 {len(stocks)} 檔普通股。開始計算技術指標 (加速版)...")
     start_date = (datetime.today() - timedelta(days=400)).strftime("%Y-%m-%d")
     all_stocks_data = []
     failed_count = 0
@@ -131,7 +126,8 @@ def main():
         rows = fetch_stock_data_with_retry(stock["code"], start_date)
         if not rows:
             failed_count += 1
-            time.sleep(1)
+            # 抓不到就稍微停一下下，避免連續報錯
+            time.sleep(0.5)
             continue
             
         res = process_stock(rows, stock)
@@ -139,21 +135,20 @@ def main():
             all_stocks_data.append(res)
             
         if (idx + 1) % 50 == 0:
-            print(f"進度: {idx+1} / {len(stocks)}")
+            print(f"進度: {idx+1} / {len(stocks)} 檔處理完成...")
         
-        time.sleep(1.0)
+        # 加速關鍵：每次只睡 0.3 秒
+        time.sleep(0.3)
 
-    # 寫入 json (注意檔名改為 all_stocks_data.json)
     output_data = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "total_valid_stocks": len(all_stocks_data),
         "stocks": all_stocks_data
     }
-
     with open("all_stocks_data.json", "w", encoding="utf-8") as f:
         json.dump(output_data, f, ensure_ascii=False, indent=2)
-    
-    print("\n=== 掃描完成 ===")
+    print(f"\n=== 掃描完成 ===")
+    print(f"總計掃描: {len(stocks)} 檔，失敗/無資料: {failed_count} 檔")
     print(f"成功儲存 {len(all_stocks_data)} 檔股票的技術指標至 all_stocks_data.json！")
 
 if __name__ == "__main__":
