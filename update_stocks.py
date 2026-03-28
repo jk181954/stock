@@ -1,10 +1,14 @@
 import requests
 import json
-import os
-import yfinance as yf
-import pandas as pd
-from datetime import datetime
 import time
+import os
+from datetime import datetime, timedelta
+
+# 若有 Token 可加在 Github Secrets 裡，沒設定就是空字串
+FINMIND_TOKEN = os.getenv("FINMIND_TOKEN", "")
+
+def get_headers():
+    return {"Authorization": f"Bearer {FINMIND_TOKEN}"} if FINMIND_TOKEN else {}
 
 def fetch_all_stock_list():
     stocks = []
@@ -40,141 +44,135 @@ def fetch_all_stock_list():
 
     return stocks
 
-def is_ma200_up_10days(ma200_series):
-    last_10 = ma200_series.tail(10).tolist()
-    if len(last_10) < 10 or pd.isna(last_10).any():
-        return False
+def fetch_stock_data_with_retry(stock_id, start_date, max_retries=3):
+    url = "https://api.finmindtrade.com/api/v4/data"
+    params = {"dataset": "TaiwanStockPrice", "data_id": stock_id, "start_date": start_date}
+    
+    for attempt in range(max_retries):
+        try:
+            res = requests.get(url, params=params, headers=get_headers(), timeout=10)
+            if res.status_code == 200:
+                data = res.json().get("data", [])
+                return sorted(data, key=lambda x: x["date"])
+            elif res.status_code == 429 or res.status_code == 403:
+                # 被限流，休息久一點
+                time.sleep(5)
+        except Exception:
+            time.sleep(2)
+    return []
+
+def moving_average(values, period):
+    if len(values) < period: return None
+    return sum(values[-period:]) / period
+
+def rolling_ma(values, period, count):
+    res = []
+    if len(values) < period + count - 1: return res
+    for i in range(count):
+        end = len(values) - count + i + 1
+        start = end - period
+        if start < 0: return []
+        res.append(sum(values[start:end]) / period)
+    return res
+
+def is_ma200_up_10days(closes):
+    ma_values = rolling_ma(closes, 200, 10)
+    if len(ma_values) < 10: return False
     for i in range(1, 10):
-        if last_10[i] <= last_10[i-1]:
-            return False
+        if ma_values[i] <= ma_values[i - 1]: return False
     return True
+
+def calculate_strategy(stock_rows, stock_info):
+    if len(stock_rows) < 220: return None
+    
+    closes, volumes = [], []
+    for row in stock_rows:
+        try:
+            closes.append(float(row["close"]))
+            volumes.append(float(row["Trading_Volume"]))
+        except:
+            continue
+
+    if len(closes) < 220 or len(volumes) < 220: return None
+
+    close = closes[-1]
+    ma5 = moving_average(closes, 5)
+    ma20 = moving_average(closes, 20)
+    ma60 = moving_average(closes, 60)
+    ma200 = moving_average(closes, 200)
+    lowest_close_20 = min(closes[-20:])
+    volume = volumes[-1] / 1000
+    ma200_up_10days = is_ma200_up_10days(closes)
+
+    if None in [ma5, ma20, ma60, ma200]: return None
+
+    passed = (
+        close > ma5 and 
+        close > ma20 and 
+        close > ma60 and
+        lowest_close_20 < ma20 and
+        volume > 500 and
+        close < ma200 * 1.4 and
+        ma200_up_10days
+    )
+
+    if passed:
+        return {
+            "code": stock_info["code"],
+            "name": stock_info["name"],
+            "market": stock_info["market"],
+            "close": round(close, 2),
+            "ma5": round(ma5, 2),
+            "ma20": round(ma20, 2),
+            "ma60": round(ma60, 2),
+            "ma200": round(ma200, 2),
+            "lowestClose20": round(lowest_close_20, 2),
+            "volume": round(volume, 2),
+        }
+    return None
 
 def main():
     print("=== 開始獲取台股清單 ===")
-    stocks_info = fetch_all_stock_list()
+    stocks = fetch_all_stock_list()
     
-    if not stocks_info:
+    if not stocks:
         print("無法取得股票清單")
         return
 
-    print(f"共取得 {len(stocks_info)} 檔普通股。開始透過 yfinance 下載...")
+    print(f"共取得 {len(stocks)} 檔普通股。開始緩慢爬取 (預計需要 30 分鐘以上)...")
 
-    # 把股票代碼轉成 YF 格式
-    # Yahoo 對台灣股票的後綴滿混亂的，但大多數上市用 .TW，上櫃用 .TWO
-    all_tickers = []
-    ticker_to_info = {}
-
-    for s in stocks_info:
-        suffix = ".TW" if s["market"] == "上市" else ".TWO"
-        yf_ticker = f"{s['code']}{suffix}"
-        all_tickers.append(yf_ticker)
-        ticker_to_info[yf_ticker] = s
-
+    start_date = (datetime.today() - timedelta(days=400)).strftime("%Y-%m-%d")
     results = []
-    checked_count = 0
     failed_count = 0
-
-    # 為了不被 Yahoo 鎖 IP，我們一次下載 50 檔，並且不用多執行緒 (threads=False)
-    batch_size = 50
     
-    for i in range(0, len(all_tickers), batch_size):
-        batch_tickers = all_tickers[i:i + batch_size]
-        print(f"\n進度: 處理第 {i+1} 到 {i+len(batch_tickers)} 檔...")
+    for idx, stock in enumerate(stocks):
+        rows = fetch_stock_data_with_retry(stock["code"], start_date)
         
-        # threads=False 非常重要，強制單線程排隊下載，不惹怒 Yahoo
-        try:
-            data = yf.download(
-                batch_tickers, 
-                period="1y", 
-                interval="1d", 
-                group_by="ticker", 
-                auto_adjust=False, 
-                prepost=False, 
-                threads=False, 
-                progress=False
-            )
-            
-            # 給 Yahoo 喘口氣
-            time.sleep(2)
-            
-        except Exception as e:
-            print(f"批次下載失敗: {e}")
-            failed_count += len(batch_tickers)
+        if not rows:
+            failed_count += 1
+            print(f"[{idx+1}/{len(stocks)}] {stock['code']} 抓取失敗或無資料")
+            # 失敗也要休息，避免被徹底封鎖
+            time.sleep(1)
             continue
-
-        for ticker in batch_tickers:
-            checked_count += 1
-            info = ticker_to_info[ticker]
             
-            try:
-                if len(batch_tickers) == 1:
-                    df = data.copy()
-                else:
-                    df = data[ticker].copy()
-                
-                df = df.dropna(subset=['Close', 'Volume'])
-                if len(df) < 220:
-                    continue
-
-                close_series = df['Close']
-                volume_series = df['Volume']
-
-                ma5 = close_series.rolling(window=5).mean()
-                ma20 = close_series.rolling(window=20).mean()
-                ma60 = close_series.rolling(window=60).mean()
-                ma200 = close_series.rolling(window=200).mean()
-                
-                lowest_close_20 = close_series.rolling(window=20).min()
-
-                latest_close = close_series.iloc[-1]
-                latest_vol = volume_series.iloc[-1] / 1000 
-                
-                c_ma5 = ma5.iloc[-1]
-                c_ma20 = ma20.iloc[-1]
-                c_ma60 = ma60.iloc[-1]
-                c_ma200 = ma200.iloc[-1]
-                # 抓過去 20 日最低
-                c_low20 = lowest_close_20.iloc[-2] 
-                
-                if pd.isna(c_ma5) or pd.isna(c_ma20) or pd.isna(c_ma60) or pd.isna(c_ma200):
-                    continue
-
-                ma200_up = is_ma200_up_10days(ma200)
-
-                # 策略條件
-                passed = (
-                    latest_close > c_ma5 and 
-                    latest_close > c_ma20 and 
-                    latest_close > c_ma60 and
-                    c_low20 < c_ma20 and
-                    latest_vol > 500 and
-                    latest_close < c_ma200 * 1.4 and
-                    ma200_up
-                )
-
-                if passed:
-                    results.append({
-                        "code": info["code"],
-                        "name": info["name"],
-                        "market": info["market"],
-                        "close": round(float(latest_close), 2),
-                        "ma5": round(float(c_ma5), 2),
-                        "ma20": round(float(c_ma20), 2),
-                        "ma60": round(float(c_ma60), 2),
-                        "ma200": round(float(c_ma200), 2),
-                        "lowestClose20": round(float(c_low20), 2),
-                        "volume": round(float(latest_vol), 2),
-                    })
-                    print(f"🔥 找到標的: {info['code']} {info['name']}")
-
-            except Exception:
-                failed_count += 1
-                pass
+        res = calculate_strategy(rows, stock)
+        
+        if res:
+            results.append(res)
+            print(f"🔥 [{idx+1}/{len(stocks)}] 找到符合標的: {stock['code']} {stock['name']}")
+        else:
+            if (idx + 1) % 50 == 0:
+                print(f"[{idx+1}/{len(stocks)}] 掃描進度正常...")
+        
+        # 最核心的防鎖機制：每查一檔，強迫休息 1 秒鐘
+        # 1700 檔 * 1 秒 = 1700 秒 = 大約 28 分鐘
+        # GitHub Actions 免費額度一次可以跑 360 分鐘，絕對夠用
+        time.sleep(1.0)
 
     # 寫入 json
     output_data = {
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "checked_count": checked_count,
+        "checked_count": len(stocks),
         "matched_count": len(results),
         "failed_count": failed_count,
         "stocks": results
@@ -184,8 +182,8 @@ def main():
         json.dump(output_data, f, ensure_ascii=False, indent=2)
     
     print("\n=== 掃描完成 ===")
-    print(f"總計掃描: {checked_count} 檔")
-    print(f"無法解析 (無資料/下市): {failed_count} 檔")
+    print(f"總計掃描: {len(stocks)} 檔")
+    print(f"無法解析: {failed_count} 檔")
     print(f"符合策略: {len(results)} 檔")
 
 if __name__ == "__main__":
