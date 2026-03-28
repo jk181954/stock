@@ -1,12 +1,10 @@
 import requests
 import json
-import os
 import time
-import yfinance as yf
+import twstock
 import pandas as pd
 from datetime import datetime
 
-# 1. 抓取上市 + 上櫃清單
 def fetch_all_stock_list():
     stocks = []
     seen_codes = set()
@@ -39,7 +37,7 @@ def fetch_all_stock_list():
     return stocks
 
 def is_ma200_up_10days(ma200_series):
-    last_10 = ma200_series.tail(10).tolist()
+    last_10 = ma200_series[-10:]
     if len(last_10) < 10 or pd.isna(last_10).any():
         return False
     for i in range(1, 10):
@@ -55,114 +53,95 @@ def main():
         print("無法取得股票清單")
         return
 
-    print(f"共取得 {len(stocks_info)} 檔普通股。開始透過 yfinance 聰明批次下載...")
-
-    # 把股票代碼轉成 YF 格式
-    all_tickers = []
-    ticker_to_info = {}
-
-    for s in stocks_info:
-        suffix = ".TW" if s["market"] == "上市" else ".TWO"
-        yf_ticker = f"{s['code']}{suffix}"
-        all_tickers.append(yf_ticker)
-        ticker_to_info[yf_ticker] = s
+    print(f"共取得 {len(stocks_info)} 檔普通股。開始透過 twstock 下載 (自動防鎖機制)...")
 
     all_stocks_data = []
     checked_count = 0
     failed_count = 0
 
-    # 聰明切塊：每次只問 20 檔，避免被 Yahoo 鎖 IP
-    batch_size = 20
-    
-    for i in range(0, len(all_tickers), batch_size):
-        batch_tickers = all_tickers[i:i + batch_size]
-        print(f"進度: 處理第 {i+1} 到 {i+len(batch_tickers)} 檔...")
+    for idx, s in enumerate(stocks_info):
+        code = s["code"]
+        checked_count += 1
         
+        if checked_count % 10 == 0:
+            print(f"進度: 處理第 {checked_count} / {len(stocks_info)} 檔...")
+
         try:
-            # 使用 pandas datareader 核心的 yf.download
-            # threads=False 避免多線程引發連線阻擋
-            data = yf.download(
-                batch_tickers, 
-                period="1y", 
-                interval="1d", 
-                group_by="ticker", 
-                auto_adjust=False, 
-                prepost=False, 
-                threads=False, 
-                progress=False
-            )
+            # twstock.Stock 會自動抓取最近 31 天的資料，並支援 fetch_from 抓取歷史
+            # 我們需要 220 天來算 200MA，抓 10 個月
+            stock = twstock.Stock(code)
             
-            # 每批次要乖乖休息 2 秒，假裝是人類在查資料
-            time.sleep(2)
+            # 抓取過去 10 個月的資料 (確保有 220 天營業日)
+            target_date = datetime.now()
+            year = target_date.year
+            month = target_date.month
             
-        except Exception as e:
-            print(f"批次下載失敗: {e}")
-            failed_count += len(batch_tickers)
-            time.sleep(5) # 被擋就睡久一點
-            continue
-
-        for ticker in batch_tickers:
-            checked_count += 1
-            info = ticker_to_info[ticker]
+            # 往前推 10 個月
+            fetch_month = month - 10
+            fetch_year = year
+            if fetch_month <= 0:
+                fetch_month += 12
+                fetch_year -= 1
+                
+            # twstock 會自動處理爬蟲並合併資料
+            stock.fetch_from(fetch_year, fetch_month)
             
-            try:
-                if len(batch_tickers) == 1:
-                    df = data.copy()
-                else:
-                    df = data[ticker].copy()
-                
-                # 排除沒有資料的爛股
-                if df.empty or 'Close' not in df.columns:
-                    continue
-
-                df = df.dropna(subset=['Close', 'Volume'])
-                
-                # 如果這檔股票剛上市不到 220 天，算不出 200MA，就跳過
-                if len(df) < 220:
-                    continue
-
-                close_series = df['Close']
-                volume_series = df['Volume']
-
-                ma5 = close_series.rolling(window=5).mean()
-                ma20 = close_series.rolling(window=20).mean()
-                ma60 = close_series.rolling(window=60).mean()
-                ma200 = close_series.rolling(window=200).mean()
-                
-                lowest_close_20 = close_series.rolling(window=20).min()
-
-                latest_close = close_series.iloc[-1]
-                # yfinance 的台股成交量通常是「股數」，所以除以 1000 變「張數」
-                latest_vol = volume_series.iloc[-1] / 1000 
-                
-                c_ma5 = ma5.iloc[-1]
-                c_ma20 = ma20.iloc[-1]
-                c_ma60 = ma60.iloc[-1]
-                c_ma200 = ma200.iloc[-1]
-                c_low20 = lowest_close_20.iloc[-2] 
-                
-                if pd.isna(c_ma5) or pd.isna(c_ma20) or pd.isna(c_ma60) or pd.isna(c_ma200):
-                    continue
-
-                ma200_up = is_ma200_up_10days(ma200)
-
-                all_stocks_data.append({
-                    "code": info["code"],
-                    "name": info["name"],
-                    "market": info["market"],
-                    "close": round(float(latest_close), 2),
-                    "ma5": round(float(c_ma5), 2),
-                    "ma20": round(float(c_ma20), 2),
-                    "ma60": round(float(c_ma60), 2),
-                    "ma200": round(float(c_ma200), 2),
-                    "lowestClose20": round(float(c_low20), 2),
-                    "volume": round(float(latest_vol), 2),
-                    "ma200_up_10days": ma200_up
-                })
-
-            except Exception:
+            if len(stock.price) < 220:
                 failed_count += 1
-                pass
+                time.sleep(1) # 短暫休息
+                continue
+
+            # 使用 pandas 計算指標
+            df = pd.DataFrame({
+                'Close': stock.price,
+                'Volume': stock.capacity # twstock 的 capacity 是股數
+            })
+            
+            close_series = df['Close']
+            volume_series = df['Volume']
+
+            ma5 = close_series.rolling(window=5).mean()
+            ma20 = close_series.rolling(window=20).mean()
+            ma60 = close_series.rolling(window=60).mean()
+            ma200 = close_series.rolling(window=200).mean()
+            lowest_close_20 = close_series.rolling(window=20).min()
+
+            latest_close = close_series.iloc[-1]
+            latest_vol = volume_series.iloc[-1] / 1000 # 轉張數
+            
+            c_ma5 = ma5.iloc[-1]
+            c_ma20 = ma20.iloc[-1]
+            c_ma60 = ma60.iloc[-1]
+            c_ma200 = ma200.iloc[-1]
+            c_low20 = lowest_close_20.iloc[-2]
+
+            if pd.isna(c_ma5) or pd.isna(c_ma20) or pd.isna(c_ma60) or pd.isna(c_ma200):
+                continue
+
+            ma200_up = is_ma200_up_10days(ma200.tolist())
+
+            all_stocks_data.append({
+                "code": s["code"],
+                "name": s["name"],
+                "market": s["market"],
+                "close": round(float(latest_close), 2),
+                "ma5": round(float(c_ma5), 2),
+                "ma20": round(float(c_ma20), 2),
+                "ma60": round(float(c_ma60), 2),
+                "ma200": round(float(c_ma200), 2),
+                "lowestClose20": round(float(c_low20), 2),
+                "volume": round(float(latest_vol), 2),
+                "ma200_up_10days": ma200_up
+            })
+            
+            # twstock 內建有防鎖機制，但我們保險起見再加一點延遲
+            time.sleep(1)
+
+        except Exception as e:
+            failed_count += 1
+            # 遇到錯誤多休一下
+            time.sleep(3)
+            continue
 
     # 寫入 json
     output_data = {
@@ -176,7 +155,7 @@ def main():
     
     print("\n=== 掃描完成 ===")
     print(f"總計掃描: {checked_count} 檔")
-    print(f"無法解析 (無資料/下市/剛上市): {failed_count} 檔")
+    print(f"無法解析 (無資料/下市/剛上市/連線錯誤): {failed_count} 檔")
     print(f"成功儲存 {len(all_stocks_data)} 檔股票的技術指標至 all_stocks_data.json！")
 
 if __name__ == "__main__":
