@@ -32,5 +32,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add stocks.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update stocks.json" && git push)
+          git add all_stocks_data.json
+          # 如果資料有更新就 commit，沒更新就不做
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update all_stocks_data.json" && git push)
