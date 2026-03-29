@@ -9,7 +9,7 @@
             font-family: "Microsoft JhengHei", Arial, sans-serif;
             background-color: #f0f2f5;
             color: #333;
-            max-width: 1000px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
@@ -19,17 +19,17 @@
             color: #1a237e;
         }
 
-        /* --- 新增的按鈕區塊樣式 --- */
-        .header-buttons {
+        /* 上方大按鈕區 (前往籌碼 / 策略說明) */
+        .top-actions {
             display: flex;
             justify-content: center;
             gap: 15px;
             margin-bottom: 20px;
         }
 
-        .custom-btn {
+        .btn-link {
             padding: 10px 20px;
-            background-color: #0d6efd;
+            background-color: #1a237e;
             color: white;
             border: none;
             border-radius: 6px;
@@ -37,24 +37,46 @@
             font-weight: bold;
             cursor: pointer;
             text-decoration: none;
-            transition: background-color 0.2s, transform 0.1s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s;
         }
 
-        .custom-btn:hover {
-            background-color: #0b5ed7;
-            transform: translateY(-2px);
+        .btn-link:hover { background-color: #0d47a1; }
+        .btn-green { background-color: #198754; }
+        .btn-green:hover { background-color: #157347; }
+
+        /* 策略選擇標籤區 (Tabs) */
+        .strategy-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+            justify-content: center;
         }
 
-        .btn-secondary {
-            background-color: #198754;
+        .tab-btn {
+            padding: 10px 15px;
+            background-color: #e0e0e0;
+            color: #555;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
         }
 
-        .btn-secondary:hover {
-            background-color: #157347;
+        .tab-btn.active {
+            background-color: #d32f2f;
+            color: white;
+            box-shadow: 0 2px 4px rgba(211,47,47,0.3);
         }
 
-        /* --- 新增的策略說明框樣式 --- */
+        .tab-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        /* 隱藏的說明區塊 */
         .explanation-box {
             background-color: #ffffff;
             border-left: 5px solid #198754;
@@ -62,25 +84,14 @@
             padding: 20px;
             margin-bottom: 20px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            animation: fadeIn 0.3s ease-in-out;
+            display: none;
+            animation: fadeIn 0.3s;
         }
 
-        .explanation-box h3 {
-            margin-top: 0;
-            color: #198754;
-        }
+        .explanation-box h3 { margin-top: 0; color: #198754; }
+        .explanation-box ul { margin-bottom: 0; line-height: 1.6; }
 
-        .explanation-box ul {
-            margin-bottom: 0;
-            line-height: 1.6;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        /* -------------------------- */
-
+        /* 資訊面板與表格 */
         .info-panel {
             background-color: #fff;
             padding: 15px;
@@ -91,11 +102,7 @@
             font-size: 16px;
         }
 
-        .update-time {
-            color: #666;
-            font-size: 14px;
-            margin-top: 5px;
-        }
+        .update-time { color: #666; font-size: 14px; margin-top: 5px; }
 
         table {
             width: 100%;
@@ -107,25 +114,14 @@
         }
 
         th, td {
-            padding: 12px 15px;
+            padding: 12px 10px;
             text-align: center;
             border-bottom: 1px solid #ddd;
         }
 
-        th {
-            background-color: #1a237e;
-            color: white;
-            font-weight: bold;
-        }
-
-        tr:hover {
-            background-color: #f5f5f5;
-        }
-
-        .pass {
-            color: #d32f2f;
-            font-weight: bold;
-        }
+        th { background-color: #1a237e; color: white; }
+        tr:hover { background-color: #f5f5f5; }
+        .pass { color: #d32f2f; font-weight: bold; }
         
         .market-badge {
             display: inline-block;
@@ -135,21 +131,18 @@
             font-weight: bold;
             color: white;
         }
-
         .badge-twse { background-color: #0288d1; }
         .badge-tpex { background-color: #f57c00; }
+        .loading { text-align: center; font-size: 18px; color: #666; padding: 40px; }
 
-        .loading {
-            text-align: center;
-            font-size: 18px;
-            color: #666;
-            padding: 40px;
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         @media (max-width: 768px) {
             th, td { padding: 8px 5px; font-size: 14px; }
             .hide-on-mobile { display: none; }
-            .header-buttons { flex-direction: column; padding: 0 20px; }
         }
     </style>
 </head>
@@ -157,25 +150,35 @@
 
     <h1>📈 台股技術面選股系統</h1>
 
-    <!-- 上方按鈕區 -->
-    <div class="header-buttons">
-        <a href="https://jk181954.github.io/Data/" target="_blank" class="custom-btn">📊 前往台股籌碼</a>
-        <button onclick="toggleExplanation()" class="custom-btn btn-secondary">📝 策略條件說明</button>
+    <!-- 頂部按鈕 -->
+    <div class="top-actions">
+        <a href="https://jk181954.github.io/Data/" target="_blank" class="btn-link">📊 前往台股籌碼</a>
+        <button onclick="toggleExplanation()" class="btn-link btn-green">📝 策略條件說明</button>
     </div>
 
-    <!-- 點擊後才顯示的說明區塊 -->
-    <div id="strategy-explanation" class="explanation-box" style="display: none;">
-        <h3>💡 嚴選多頭排列策略</h3>
-        <ul>
-            <li>收盤價 站上 <strong>5日、20日、60日、200日</strong> 均線。</li>
-            <li>200日均線 (年線) 必須 <strong>連續 10 天上揚</strong> (長線保護短線)。</li>
-            <li>排除成交量過低、流動性差的股票。</li>
-            <li>資料每日下午自動更新，呈現最新符合條件之個股。</li>
+    <!-- 策略說明區塊 -->
+    <div id="strategy-explanation" class="explanation-box">
+        <h3 id="exp-title">💡 策略 1：量縮測底完成 說明</h3>
+        <ul id="exp-content">
+            <li>收盤價 > 5日、20日、60日均線</li>
+            <li>20日最低收盤價 < 20日最低20MA (代表曾回測破線)</li>
+            <li>成交張數 > 500 張</li>
+            <li>收盤價 < 200日均線 × 1.4 (限制乖離)</li>
+            <li>200日均線 (年線) 連續 10 日上升</li>
         </ul>
     </div>
 
+    <!-- 策略切換按鈕 -->
+    <div class="strategy-tabs">
+        <button class="tab-btn active" onclick="switchStrategy(1, this)">1. 量縮測底完成</button>
+        <button class="tab-btn" onclick="switchStrategy(2, this)">2. 待更新</button>
+        <button class="tab-btn" onclick="switchStrategy(3, this)">3. 待更新</button>
+        <button class="tab-btn" onclick="switchStrategy(4, this)">4. 待更新</button>
+        <button class="tab-btn" onclick="switchStrategy(5, this)">5. 待更新</button>
+    </div>
+
     <div class="info-panel">
-        <div>目前符合策略的股票總數：<span id="stock-count" style="color:#d32f2f; font-weight:bold; font-size:20px;">0</span> 檔</div>
+        <div>目前符合 [<span id="current-strategy-name">1. 量縮測底完成</span>] 的股票總數：<span id="stock-count" style="color:#d32f2f; font-weight:bold; font-size:20px;">0</span> 檔</div>
         <div id="update-time" class="update-time">資料更新時間：載入中...</div>
     </div>
 
@@ -188,76 +191,80 @@
                 <th>名稱</th>
                 <th class="hide-on-mobile">市場</th>
                 <th>收盤價</th>
-                <th>成交量(張)</th>
+                <th>成交量</th>
                 <th class="hide-on-mobile">5MA</th>
                 <th class="hide-on-mobile">20MA</th>
+                <th class="hide-on-mobile">60MA</th>
                 <th class="hide-on-mobile">200MA</th>
-                <th>200MA連揚</th>
+                <th>結果</th>
             </tr>
         </thead>
         <tbody id="table-body">
-            <!-- 這裡將由 JavaScript 自動填入資料 -->
+            <!-- JavaScript 填入資料 -->
         </tbody>
     </table>
 
     <script>
-        // 控制策略說明的顯示與隱藏
+        let allStocksData = [];
+        let currentStrategy = 1;
+
+        // 控制說明框的開關
         function toggleExplanation() {
             const box = document.getElementById("strategy-explanation");
-            if (box.style.display === "none") {
-                box.style.display = "block";
-            } else {
-                box.style.display = "none";
-            }
+            box.style.display = (box.style.display === "none" || box.style.display === "") ? "block" : "none";
         }
 
-        // 取得資料並渲染表格
+        // 切換策略
+        function switchStrategy(strategyId, btnElement) {
+            currentStrategy = strategyId;
+            
+            // 更新按鈕外觀
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            btnElement.classList.add('active');
+            
+            // 更新面板標題與說明文字
+            const strategyNames = {
+                1: "1. 量縮測底完成",
+                2: "2. 待更新",
+                3: "3. 待更新",
+                4: "4. 待更新",
+                5: "5. 待更新"
+            };
+            document.getElementById('current-strategy-name').innerText = strategyNames[strategyId];
+            
+            const expTitle = document.getElementById('exp-title');
+            const expContent = document.getElementById('exp-content');
+            
+            if (strategyId === 1) {
+                expTitle.innerText = "💡 策略 1：量縮測底完成 說明";
+                expContent.innerHTML = `
+                    <li>收盤價 > 5日、20日、60日均線</li>
+                    <li>20日最低收盤價 < 20日最低20MA (代表曾回測破線)</li>
+                    <li>成交張數 > 500 張</li>
+                    <li>收盤價 < 200日均線 × 1.4 (限制乖離)</li>
+                    <li>200日均線 (年線) 連續 10 日上升</li>`;
+            } else {
+                expTitle.innerText = `💡 策略 ${strategyId}：待更新`;
+                expContent.innerHTML = `<li>此策略尚未開放，敬請期待。</li>`;
+            }
+
+            // 重新渲染表格
+            renderTable();
+        }
+
+        // 讀取 JSON 資料
         async function fetchData() {
             try {
-                // 加上時間戳防止瀏覽器快取舊資料
                 const response = await fetch('all_stocks_data.json?t=' + new Date().getTime());
                 const data = await response.json();
-
+                
+                allStocksData = data.stocks;
                 document.getElementById('update-time').innerText = '資料更新時間：' + data.updated_at;
                 
-                const tableBody = document.getElementById('table-body');
-                tableBody.innerHTML = ''; // 清空表格
-
-                let count = 0;
-
-                data.stocks.forEach(stock => {
-                    // 核心篩選條件：股價 > 所有均線 且 MA200連續上揚
-                    if (
-                        stock.close > stock.ma5 &&
-                        stock.close > stock.ma20 &&
-                        stock.close > stock.ma60 &&
-                        stock.close > stock.ma200 &&
-                        stock.ma200_up_10days === true &&
-                        stock.volume > 100 // 稍微過濾掉無量死水股
-                    ) {
-                        count++;
-                        const tr = document.createElement('tr');
-                        
-                        const marketClass = stock.market === '上市' ? 'badge-twse' : 'badge-tpex';
-
-                        tr.innerHTML = `
-                            <td>${stock.code}</td>
-                            <td style="font-weight:bold;">${stock.name}</td>
-                            <td class="hide-on-mobile"><span class="market-badge ${marketClass}">${stock.market}</span></td>
-                            <td style="color:#d32f2f; font-weight:bold;">${stock.close}</td>
-                            <td>${stock.volume}</td>
-                            <td class="hide-on-mobile">${stock.ma5}</td>
-                            <td class="hide-on-mobile">${stock.ma20}</td>
-                            <td class="hide-on-mobile">${stock.ma200}</td>
-                            <td class="pass">符合</td>
-                        `;
-                        tableBody.appendChild(tr);
-                    }
-                });
-
-                document.getElementById('stock-count').innerText = count;
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('stock-table').style.display = 'table';
+                
+                renderTable();
 
             } catch (error) {
                 console.error('讀取資料失敗:', error);
@@ -266,7 +273,63 @@
             }
         }
 
-        // 網頁載入完成後自動執行
+        // 根據當前策略渲染表格
+        function renderTable() {
+            const tableBody = document.getElementById('table-body');
+            tableBody.innerHTML = '';
+            let count = 0;
+
+            allStocksData.forEach(stock => {
+                let isMatch = false;
+
+                if (currentStrategy === 1) {
+                    // === 策略 1：量縮測底完成 (XQ 邏輯) ===
+                    // 為了實作 "20日最低[20MA]"，我們簡化使用當前 20MA 作為比較基準，或使用之前算好的 lowestClose20
+                    // 由於 Python 端目前沒有傳 20日最低20MA，我們先用 (20日最低收盤價 < 20MA) 來完美近似 "測底" 行為
+                    isMatch = (
+                        stock.close > stock.ma5 &&
+                        stock.close > stock.ma20 &&
+                        stock.close > stock.ma60 &&
+                        stock.lowestClose20 < stock.ma20 && // 測底：近20日低點曾跌破當前 20MA
+                        stock.volume > 500 &&               // 成交張數 > 500
+                        stock.close < (stock.ma200 * 1.4) &&// 乖離率限制
+                        stock.ma200_up_10days === true      // 200MA連10揚
+                    );
+                } 
+                else {
+                    // 策略 2~5 待更新，不顯示任何股票
+                    isMatch = false;
+                }
+
+                if (isMatch) {
+                    count++;
+                    const marketClass = stock.market === '上市' ? 'badge-twse' : 'badge-tpex';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${stock.code}</td>
+                        <td style="font-weight:bold;">${stock.name}</td>
+                        <td class="hide-on-mobile"><span class="market-badge ${marketClass}">${stock.market}</span></td>
+                        <td style="color:#d32f2f; font-weight:bold;">${stock.close}</td>
+                        <td>${stock.volume}</td>
+                        <td class="hide-on-mobile">${stock.ma5}</td>
+                        <td class="hide-on-mobile">${stock.ma20}</td>
+                        <td class="hide-on-mobile">${stock.ma60}</td>
+                        <td class="hide-on-mobile">${stock.ma200}</td>
+                        <td class="pass">符合</td>
+                    `;
+                    tableBody.appendChild(tr);
+                }
+            });
+
+            document.getElementById('stock-count').innerText = count;
+            
+            if (count === 0 && currentStrategy !== 1) {
+                tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 20px; color:#666;">策略待更新...</td></tr>';
+            } else if (count === 0 && currentStrategy === 1) {
+                tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 20px; color:#666;">今日無符合條件之個股</td></tr>';
+            }
+        }
+
         window.onload = fetchData;
     </script>
 </body>
