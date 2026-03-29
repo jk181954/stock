@@ -255,6 +255,7 @@
         // 讀取 JSON 資料
         async function fetchData() {
             try {
+                // 加上時間戳防止瀏覽器快取舊資料
                 const response = await fetch('all_stocks_data.json?t=' + new Date().getTime());
                 const data = await response.json();
                 
@@ -284,8 +285,6 @@
 
                 if (currentStrategy === 1) {
                     // === 策略 1：量縮測底完成 (XQ 邏輯) ===
-                    // 為了實作 "20日最低[20MA]"，我們簡化使用當前 20MA 作為比較基準，或使用之前算好的 lowestClose20
-                    // 由於 Python 端目前沒有傳 20日最低20MA，我們先用 (20日最低收盤價 < 20MA) 來完美近似 "測底" 行為
                     isMatch = (
                         stock.close > stock.ma5 &&
                         stock.close > stock.ma20 &&
@@ -297,7 +296,7 @@
                     );
                 } 
                 else {
-                    // 策略 2~5 待更新，不顯示任何股票
+                    // 策略 2~5 待更新
                     isMatch = false;
                 }
 
@@ -305,8 +304,14 @@
                     count++;
                     const marketClass = stock.market === '上市' ? 'badge-twse' : 'badge-tpex';
                     const tr = document.createElement('tr');
+                    
+                    // 這裡加入了玩股網的超連結
                     tr.innerHTML = `
-                        <td>${stock.code}</td>
+                        <td>
+                            <a href="https://www.wantgoo.com/stock/${stock.code}" target="_blank" style="color:#0d6efd; text-decoration:none; font-weight:bold;">
+                                ${stock.code}
+                            </a>
+                        </td>
                         <td style="font-weight:bold;">${stock.name}</td>
                         <td class="hide-on-mobile"><span class="market-badge ${marketClass}">${stock.market}</span></td>
                         <td style="color:#d32f2f; font-weight:bold;">${stock.close}</td>
@@ -330,6 +335,7 @@
             }
         }
 
+        // 網頁載入完成後自動執行
         window.onload = fetchData;
     </script>
 </body>
