@@ -1,161 +1,249 @@
-<script>
-let allStocksData = [];
-let currentStrategy = 1;
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台股技術面選股系統</title>
+    <style>
+        body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #f0f2f5; color: #333; max-width: 1200px; margin: 0 auto; padding: 20px; }
+        h1 { text-align: center; color: #1a237e; }
+        .top-actions { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; }
+        .btn-link { padding: 10px 20px; background-color: #1a237e; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; text-decoration: none; transition: all 0.2s; }
+        .btn-link:hover { background-color: #0d47a1; }
+        .btn-green { background-color: #198754; }
+        .btn-green:hover { background-color: #157347; }
+        .strategy-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; justify-content: center; }
+        .tab-btn { padding: 10px 15px; background-color: #e0e0e0; color: #555; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; transition: all 0.3s; }
+        .tab-btn.active { background-color: #d32f2f; color: white; box-shadow: 0 2px 4px rgba(211,47,47,0.3); }
+        .explanation-box { background-color: #ffffff; border-left: 5px solid #198754; border-radius: 6px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: none; animation: fadeIn 0.3s; }
+        .explanation-box h3 { margin-top: 0; color: #198754; }
+        .explanation-box ul { margin-bottom: 0; line-height: 1.6; }
+        .info-panel { background-color: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; font-size: 16px; }
+        .update-time { color: #666; font-size: 14px; margin-top: 5px; }
+        table { width: 100%; border-collapse: collapse; background-color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px 10px; text-align: center; border-bottom: 1px solid #ddd; }
+        th { background-color: #1a237e; color: white; }
+        tr:hover { background-color: #f5f5f5; }
+        .pass { color: #d32f2f; font-weight: bold; }
+        .market-badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; }
+        .badge-twse { background-color: #0288d1; }
+        .badge-tpex { background-color: #f57c00; }
+        .loading { text-align: center; font-size: 18px; color: #666; padding: 40px; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+        @media (max-width: 768px) { th, td { padding: 8px 5px; font-size: 14px; } .hide-on-mobile { display: none; } }
+    </style>
+</head>
+<body>
 
-function toggleExplanation() {
-    const box = document.getElementById("strategy-explanation");
-    box.style.display = box.style.display === "block" ? "none" : "block";
-}
+    <h1>📈 台股技術面選股系統</h1>
 
-function switchStrategy(strategyId, btnElement) {
-    currentStrategy = strategyId;
-    document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
-    btnElement.classList.add("active");
+    <div class="top-actions">
+        <a href="https://jk181954.github.io/Data/" target="_blank" class="btn-link">📊 前往台股籌碼</a>
+        <button onclick="toggleExplanation()" class="btn-link btn-green">📝 策略條件說明</button>
+    </div>
 
-    const strategyNames = {
-        1: "1. 量縮測底完成",
-        2: "2. 空轉多拉回",
-        3: "3. 待更新",
-        4: "4. 待更新",
-        5: "5. 待更新"
-    };
-    document.getElementById("current-strategy-name").innerText = strategyNames[strategyId];
-
-    const expTitle = document.getElementById("exp-title");
-    const expContent = document.getElementById("exp-content");
-    const dynamicCol = document.getElementById("dynamic-col");
-
-    if (strategyId === 1) {
-        expTitle.innerText = "💡 策略 1：量縮測底完成 說明";
-        expContent.innerHTML = `
+    <div id="strategy-explanation" class="explanation-box">
+        <h3 id="exp-title">💡 策略 1：量縮測底完成 說明</h3>
+        <ul id="exp-content">
             <li>收盤價 > 5日、20日、60日均線</li>
-            <li>20日最低收盤價 < 20MA（代表曾回測破線）</li>
+            <li>20日最低收盤價 < 20日最低20MA (代表曾回測破線)</li>
             <li>成交張數 > 500 張</li>
-            <li>收盤價 < 200日均線 × 1.4（限制乖離）</li>
-            <li>200日均線（年線）連續 10 日上升</li>
-        `;
-        dynamicCol.innerText = "200MA連揚";
-    } else if (strategyId === 2) {
-        expTitle.innerText = "💡 策略 2：空轉多拉回 說明";
-        expContent.innerHTML = `
-            <li>收盤價 > 60日均線</li>
-            <li>20日均線 > 昨日20日均線</li>
-            <li>近10日內至少 1 日爆量（> 20日均量 × 2）</li>
-            <li>近10日內至少 1 日漲幅 > 5%</li>
-            <li>今日收盤價 < 近5日最高價</li>
-            <li>距20日均線乖離率 < 3%</li>
-            <li>今日成交量 < 5日均量，且 < 近10日最大量 50%</li>
-            <li>K值 < 60</li>
-        `;
-        dynamicCol.innerText = "KD K值";
-    } else {
-        expTitle.innerText = `💡 策略 ${strategyId}：待更新`;
-        expContent.innerHTML = `<li>策略內容待補充...</li>`;
-        dynamicCol.innerText = "...";
-    }
+            <li>收盤價 < 200日均線 × 1.4 (限制乖離)</li>
+            <li>200日均線 (年線) 連續 10 日上升</li>
+        </ul>
+    </div>
 
-    renderTable();
-}
+    <div class="strategy-tabs">
+        <button class="tab-btn active" onclick="switchStrategy(1, this)">1. 量縮測底完成</button>
+        <button class="tab-btn" onclick="switchStrategy(2, this)">2. 空轉多拉回</button>
+        <button class="tab-btn" onclick="switchStrategy(3, this)">3. 待更新</button>
+        <button class="tab-btn" onclick="switchStrategy(4, this)">4. 待更新</button>
+        <button class="tab-btn" onclick="switchStrategy(5, this)">5. 待更新</button>
+    </div>
 
-async function fetchData() {
-    try {
-        const response = await fetch(`all_stocks_data.json?t=${new Date().getTime()}`);
-        const data = await response.json();
+    <div class="info-panel">
+        <div style="margin-bottom: 8px;">總計掃描市場上：<span id="total-scanned" style="color:#1a237e; font-weight:bold;">0</span> 檔股票</div>
+        <div>目前符合 [<span id="current-strategy-name">1. 量縮測底完成</span>] 的股票總數：<span id="stock-count" style="color:#d32f2f; font-weight:bold; font-size:20px;">0</span> 檔</div>
+        <div id="update-time" class="update-time">資料更新時間：載入中...</div>
+    </div>
 
-        allStocksData = data.stocks || [];
-        document.getElementById("update-time").innerText = `資料更新時間：${data.updated_at}（台灣時間）`;
-        document.getElementById("total-scanned").innerText = data.total_valid_stocks ?? allStocksData.length;
+    <div id="loading" class="loading">資料載入中，請稍候...</div>
 
-        document.getElementById("loading").style.display = "none";
-        document.getElementById("stock-table").style.display = "table";
+    <table id="stock-table" style="display: none;">
+        <thead>
+            <tr>
+                <th>代號</th>
+                <th>名稱</th>
+                <th class="hide-on-mobile">市場</th>
+                <th>收盤價</th>
+                <th>成交量</th>
+                <th class="hide-on-mobile">5MA</th>
+                <th class="hide-on-mobile">20MA</th>
+                <th class="hide-on-mobile">60MA</th>
+                <th class="hide-on-mobile">200MA</th>
+                <th id="dynamic-col">200MA連揚</th>
+            </tr>
+        </thead>
+        <tbody id="table-body">
+        </tbody>
+    </table>
 
-        renderTable();
-    } catch (error) {
-        console.error("讀取資料失敗:", error);
-        document.getElementById("loading").innerText = "資料讀取失敗，請確認 GitHub Actions 是否正常執行";
-        document.getElementById("loading").style.color = "red";
-    }
-}
+    <script>
+        let allStocksData = [];
+        let currentStrategy = 1;
 
-function renderTable() {
-    const tableBody = document.getElementById("table-body");
-    tableBody.innerHTML = "";
-    let count = 0;
+        function toggleExplanation() {
+            const box = document.getElementById("strategy-explanation");
+            box.style.display = (box.style.display === "none" || box.style.display === "") ? "block" : "none";
+        }
 
-    allStocksData.forEach(stock => {
-        let isMatch = false;
-        let lastColValue = "";
+        function switchStrategy(strategyId, btnElement) {
+            currentStrategy = strategyId;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            btnElement.classList.add('active');
+            
+            const strategyNames = {
+                1: "1. 量縮測底完成",
+                2: "2. 空轉多拉回",
+                3: "3. 待更新",
+                4: "4. 待更新",
+                5: "5. 待更新"
+            };
+            document.getElementById('current-strategy-name').innerText = strategyNames[strategyId];
+            
+            const expTitle = document.getElementById('exp-title');
+            const expContent = document.getElementById('exp-content');
+            const dynamicCol = document.getElementById('dynamic-col');
+            
+            if (strategyId === 1) {
+                expTitle.innerText = "💡 策略 1：量縮測底完成 說明";
+                expContent.innerHTML = `
+                    <li>收盤價 > 5日、20日、60日均線</li>
+                    <li>20日最低收盤價 < 20日最低20MA (代表曾回測破線)</li>
+                    <li>成交張數 > 500 張</li>
+                    <li>收盤價 < 200日均線 × 1.4 (限制乖離)</li>
+                    <li>200日均線 (年線) 連續 10 日上升</li>`;
+                dynamicCol.innerText = "200MA連揚";
+            } else if (strategyId === 2) {
+                expTitle.innerText = "💡 策略 2：空轉多拉回 說明";
+                expContent.innerHTML = `
+                    <li>1. 今日收盤價 > 60日均線 & 20日均線</li>
+                    <li>2. 20日均線 > 昨日20日均線 (月線翻揚)</li>
+                    <li>3. 近10日內至少1日出量 (大於20日均量2倍) 且至少1日漲幅 > 5%</li>
+                    <li>4. 今日收盤價 < 近5日最高價 (代表有拉回)</li>
+                    <li>5. 今日收盤價距20日均線乖離率 < 3%</li>
+                    <li>6. 今日成交量 < 5日均量 & < 近10日最大量的 50% (量縮)</li>
+                    <li>7. KD 的 K 值 < 60</li>`;
+                dynamicCol.innerText = "KD指標(K)";
+            } else {
+                expTitle.innerText = `💡 策略 ${strategyId}：待更新`;
+                expContent.innerHTML = `<li>此策略尚未開放，敬請期待。</li>`;
+                dynamicCol.innerText = "備註";
+            }
 
-        if (currentStrategy === 1) {
-            isMatch =
-                stock.close > stock.ma5 &&
-                stock.close > stock.ma20 &&
-                stock.close > stock.ma60 &&
-                stock.lowestClose20 < stock.ma20 &&
-                stock.volume > 500 &&
-                stock.close < stock.ma200 * 1.4 &&
-                stock.ma200_up_10days === true;
+            renderTable();
+        }
 
-            lastColValue = stock.ma200_up_10days ? "是" : "否";
-        } else if (currentStrategy === 2) {
-            if (stock.k_value !== undefined) {
-                isMatch =
-                    stock.close > stock.ma60 &&
-                    stock.ma20 > stock.ma20_yesterday &&
-                    stock.has_vol_burst_10d === true &&
-                    stock.has_price_burst_10d === true &&
-                    stock.close < stock.highestClose5 &&
-                    stock.bias20 < 3.0 &&
-                    stock.volume < stock.vol_ma5 &&
-                    stock.volume < stock.max_vol_10d * 0.5 &&
-                    stock.k_value < 60;
+        async function fetchData() {
+            try {
+                const response = await fetch('all_stocks_data.json?t=' + new Date().getTime());
+                const data = await response.json();
+                
+                allStocksData = data.stocks;
+                document.getElementById('update-time').innerText = '資料更新時間：' + data.updated_at;
+                
+                // === 顯示總掃描檔數 ===
+                if (data.total_valid_stocks) {
+                    document.getElementById('total-scanned').innerText = data.total_valid_stocks;
+                } else {
+                    document.getElementById('total-scanned').innerText = allStocksData.length;
+                }
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('stock-table').style.display = 'table';
+                
+                renderTable();
 
-                lastColValue = stock.k_value;
+            } catch (error) {
+                console.error('讀取資料失敗:', error);
+                document.getElementById('loading').innerText = '資料載入失敗，請確認是否已至 GitHub Actions 重新執行抓取。';
+                document.getElementById('loading').style.color = 'red';
             }
         }
 
-        if (isMatch) {
-            count++;
-            const marketClass = stock.market === "上市" ? "badge-twse" : "badge-tpex";
-            const tr = document.createElement("tr");
+        function renderTable() {
+            const tableBody = document.getElementById('table-body');
+            tableBody.innerHTML = '';
+            let count = 0;
 
-            tr.innerHTML = `
-                <td>
-                    <a href="https://www.wantgoo.com/stock/${stock.code}/technical-chart"
-                       target="_blank" rel="noopener noreferrer"
-                       style="color:#0d6efd; text-decoration:none; font-weight:bold;">
-                       ${stock.code}
-                    </a>
-                </td>
-                <td style="font-weight:bold;">${stock.name}</td>
-                <td class="hide-on-mobile">
-                    <span class="market-badge ${marketClass}">${stock.market}</span>
-                </td>
-                <td style="color:#d32f2f; font-weight:bold;">${stock.close}</td>
-                <td>${stock.volume}</td>
-                <td class="hide-on-mobile">${stock.ma5}</td>
-                <td class="hide-on-mobile">${stock.ma20}</td>
-                <td class="hide-on-mobile">${stock.ma60}</td>
-                <td class="hide-on-mobile">${stock.ma200}</td>
-                <td class="pass">${lastColValue}</td>
-            `;
+            allStocksData.forEach(stock => {
+                let isMatch = false;
+                let lastColValue = "符合";
 
-            tableBody.appendChild(tr);
+                if (currentStrategy === 1) {
+                    isMatch = (
+                        stock.close > stock.ma5 &&
+                        stock.close > stock.ma20 &&
+                        stock.close > stock.ma60 &&
+                        stock.lowestClose20 < stock.ma20 &&
+                        stock.volume > 500 &&
+                        stock.close < (stock.ma200 * 1.4) &&
+                        stock.ma200_up_10days === true
+                    );
+                } 
+                else if (currentStrategy === 2) {
+                    if (stock.k_value !== undefined) {
+                        isMatch = (
+                            stock.close > stock.ma60 &&                           
+                            stock.ma20 > stock.ma20_yesterday &&                  
+                            stock.has_vol_burst_10d === true &&                   
+                            stock.has_price_burst_10d === true &&                 
+                            stock.close < stock.highestClose5 &&                  
+                            stock.close > stock.ma20 &&                           
+                            stock.bias20 < 3.0 &&                                 
+                            stock.volume < stock.vol_ma5 &&                       
+                            stock.volume < (stock.max_vol_10d * 0.5) &&           
+                            stock.k_value < 60                                    
+                        );
+                        lastColValue = `K: ${stock.k_value}`; 
+                    }
+                }
+
+                if (isMatch) {
+                    count++;
+                    const marketClass = stock.market === '上市' ? 'badge-twse' : 'badge-tpex';
+                    const tr = document.createElement('tr');
+                    
+                    tr.innerHTML = `
+                        <td>
+                            <a href="https://www.wantgoo.com/stock/${stock.code}/technical-chart" target="_blank" style="color:#0d6efd; text-decoration:none; font-weight:bold;">
+                                ${stock.code}
+                            </a>
+                        </td>
+                        <td style="font-weight:bold;">${stock.name}</td>
+                        <td class="hide-on-mobile"><span class="market-badge ${marketClass}">${stock.market}</span></td>
+                        <td style="color:#d32f2f; font-weight:bold;">${stock.close}</td>
+                        <td>${stock.volume}</td>
+                        <td class="hide-on-mobile">${stock.ma5}</td>
+                        <td class="hide-on-mobile">${stock.ma20}</td>
+                        <td class="hide-on-mobile">${stock.ma60}</td>
+                        <td class="hide-on-mobile">${stock.ma200}</td>
+                        <td class="pass">${lastColValue}</td>
+                    `;
+                    tableBody.appendChild(tr);
+                }
+            });
+
+            document.getElementById('stock-count').innerText = count;
+            
+            if (count === 0 && currentStrategy > 2) {
+                tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 20px; color:#666;">策略待更新...</td></tr>';
+            } else if (count === 0 && (currentStrategy === 1 || currentStrategy === 2)) {
+                tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 20px; color:#666;">今日無符合此策略條件之個股</td></tr>';
+            }
         }
-    });
 
-    document.getElementById("stock-count").innerText = count;
-
-    if (count === 0) {
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="10" style="text-align:center; padding:20px; color:#666;">
-                    目前沒有符合此策略條件的股票
-                </td>
-            </tr>
-        `;
-    }
-}
-
-window.onload = fetchData;
-</script>
+        window.onload = fetchData;
+    </script>
+</body>
+</html>
