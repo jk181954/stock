@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -20,6 +21,9 @@
         .explanation-box ul { margin-bottom: 0; line-height: 1.6; }
         .info-panel { background-color: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; font-size: 16px; }
         .update-time { color: #666; font-size: 14px; margin-top: 5px; }
+        .data-date-warning { margin-top: 8px; padding: 8px; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; font-size: 14px; }
+        .data-date-warning.yesterday { background-color: #f8d7da; border-color: #f5c6cb; color: #721c24; }
+        .data-date-warning.today { background-color: #d4edda; border-color: #c3e6cb; color: #155724; }
         table { width: 100%; border-collapse: collapse; background-color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
         th, td { padding: 12px 10px; text-align: center; border-bottom: 1px solid #ddd; }
         th { background-color: #1a237e; color: white; }
@@ -65,6 +69,7 @@
         <div style="margin-bottom: 8px;">總計掃描市場上：<span id="total-scanned" style="color:#1a237e; font-weight:bold;">0</span> 檔股票</div>
         <div>目前符合 [<span id="current-strategy-name">1. 量縮測底完成</span>] 的股票總數：<span id="stock-count" style="color:#d32f2f; font-weight:bold; font-size:20px;">0</span> 檔</div>
         <div id="update-time" class="update-time">資料更新時間：載入中...</div>
+        <div id="data-date-info" class="data-date-warning"></div>
     </div>
 
     <div id="loading" class="loading">資料載入中，請稍候...</div>
@@ -97,11 +102,30 @@
             box.style.display = (box.style.display === "none" || box.style.display === "") ? "block" : "none";
         }
 
+        function showDataDateWarning(dataDate) {
+            const warningEl = document.getElementById('data-date-info');
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            if (!dataDate) {
+                warningEl.innerHTML = '⚠️ 無法判斷資料交易日期';
+                warningEl.className = 'data-date-warning';
+                return;
+            }
+
+            if (dataDate === todayStr) {
+                warningEl.innerHTML = '✅ 資料為今天交易日';
+                warningEl.className = 'data-date-warning today';
+            } else {
+                warningEl.innerHTML = `⚠️ 資料為 ${dataDate} 交易日（非今日）`;
+                warningEl.className = 'data-date-warning yesterday';
+            }
+        }
+
         function switchStrategy(strategyId, btnElement) {
             currentStrategy = strategyId;
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             btnElement.classList.add('active');
-            
+
             const strategyNames = {
                 1: "1. 量縮測底完成",
                 2: "2. 空轉多拉回",
@@ -110,11 +134,11 @@
                 5: "5. 待更新"
             };
             document.getElementById('current-strategy-name').innerText = strategyNames[strategyId];
-            
+
             const expTitle = document.getElementById('exp-title');
             const expContent = document.getElementById('exp-content');
             const dynamicCol = document.getElementById('dynamic-col');
-            
+
             if (strategyId === 1) {
                 expTitle.innerText = "💡 策略 1：量縮測底完成 說明";
                 expContent.innerHTML = `
@@ -148,20 +172,18 @@
             try {
                 const response = await fetch('all_stocks_data.json?t=' + new Date().getTime());
                 const data = await response.json();
-                
+
                 allStocksData = data.stocks;
-                document.getElementById('update-time').innerText = '資料更新時間：' + data.updated_at;
-                
-                // === 顯示總掃描檔數 ===
-                if (data.total_valid_stocks) {
-                    document.getElementById('total-scanned').innerText = data.total_valid_stocks;
-                } else {
-                    document.getElementById('total-scanned').innerText = allStocksData.length;
-                }
-                
+                document.getElementById('update-time').innerText = '最後更新：' + data.updated_at;
+
+                // 新增：顯示資料日期與提醒
+                showDataDateWarning(data.data_date);
+
+                document.getElementById('total-scanned').innerText = data.total_valid_stocks || allStocksData.length;
+
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('stock-table').style.display = 'table';
-                
+
                 renderTable();
 
             } catch (error) {
@@ -213,7 +235,7 @@
                     count++;
                     const marketClass = stock.market === '上市' ? 'badge-twse' : 'badge-tpex';
                     const tr = document.createElement('tr');
-                    
+
                     tr.innerHTML = `
                         <td>
                             <a href="https://www.wantgoo.com/stock/${stock.code}/technical-chart" target="_blank" style="color:#0d6efd; text-decoration:none; font-weight:bold;">
@@ -235,7 +257,7 @@
             });
 
             document.getElementById('stock-count').innerText = count;
-            
+
             if (count === 0 && currentStrategy > 2) {
                 tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding: 20px; color:#666;">策略待更新...</td></tr>';
             } else if (count === 0 && (currentStrategy === 1 || currentStrategy === 2)) {
