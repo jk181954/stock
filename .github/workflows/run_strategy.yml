@@ -2,7 +2,7 @@ name: Daily Stock Scanner (V2)
 
 on:
   schedule:
-    - cron: '30 16 * * 1-5'  # 每天週一到週五下午 4:30 自動執行
+    - cron: '30 8 * * 1-5'  # UTC 08:30 = 台灣時間下午 16:3
   workflow_dispatch:  # 手動按鈕
 
 permissions:
