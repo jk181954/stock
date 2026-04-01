@@ -2,8 +2,8 @@ name: Daily Stock Scanner (V2)
 
 on:
   schedule:
-    - cron: '30 8 * * 1-5'  # UTC 08:30 = 台灣時間下午 16:30
-  workflow_dispatch:  # 手動按鈕
+    - cron: '30 8 * * 1-5' # UTC 08:30 = 台灣時間 16:30
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,9 +24,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Python script (極速增量版)
+      - name: Run Python script
         env:
           PYTHONUNBUFFERED: "1"
+          TZ: Asia/Taipei
         run: python update_stocks.py
 
       - name: Commit and push changes
@@ -34,4 +35,4 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add all_stocks_data.json historical_prices.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Daily update: stock prices and indicators $(date)" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Daily update: stock prices and indicators $(date '+%Y-%m-%d %H:%M:%S %Z')" && git push)
