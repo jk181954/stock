@@ -174,13 +174,19 @@
             try {
                 const response = await fetch('all_stocks_data.json?t=' + new Date().getTime());
                 const data = await response.json();
+// 顯示頁面更新時間
+document.getElementById('update-time').innerText = '頁面更新時間：' + data.updated_at;
 
+// 顯示資料交易日
+document.getElementById('data-date-info').innerHTML = '資料為 ' + (data.data_date || '未知') + ' 交易日';
+
+                
                 allStocksData = data.stocks;
                 document.getElementById('update-time').innerText = '頁面更新時間：' + data.updated_at;
     document.getElementById('dataDate').textContent = data.data_date || '未知';
 
                 // 新增：顯示資料日期與提醒
-                showDataDateWarning(data.data_date);
+                //showDataDateWarning(data.data_date);
 
                 document.getElementById('total-scanned').innerText = data.total_valid_stocks || allStocksData.length;
 
