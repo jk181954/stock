@@ -12,34 +12,19 @@ OUTPUT_FILE = "all_stocks_data.json"
 def get_today_quotes():
     today_data = {}
     tw_today = datetime.now(tz=pytz.timezone("Asia/Taipei")).strftime("%Y-%m-%d")
-    actual_date = None  # ✅ 從 API 取得實際交易日
+    actual_date = None
 
-    try:
-        res = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", timeout=15)
-        items = res.json()
-        for item in items:
-            code = str(item.get("Code", "")).strip()
-            close = str(item.get("ClosingPrice", "")).replace(',', '')
-            vol = str(item.get("TradeVolume", "")).replace(',', '')
-            date_str = str(item.get("Date", "")).strip()  # ✅ 格式如 "20260402"
-            if close and vol and close.replace('.', '', 1).isdigit() and len(code) == 4:
-                today_data[code] = {"close": float(close), "volume": float(vol) / 1000}
-                # ✅ 只取第一筆有效日期
-                if actual_date is None and len(date_str) == 8:
-                    actual_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-    except Exception as e:
-        print(f"獲取上市今日行情失敗: {e}")
-
+    # ✅ 先抓 TPEX（有 Date 欄位），取得實際交易日
     try:
         res = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes", timeout=15)
         for item in res.json():
             code = str(item.get("SecuritiesCompanyCode", "")).strip()
             close = str(item.get("Close", "")).replace(',', '')
             vol = str(item.get("TradingShares", "")).replace(',', '')
-            date_str = str(item.get("Date", "")).strip()  # ✅ 格式如 "115/04/02"
+            date_str = str(item.get("Date", "")).strip()  # 格式：115/04/02
             if close and vol and close.replace('.', '', 1).isdigit() and len(code) == 4:
                 today_data[code] = {"close": float(close), "volume": float(vol) / 1000}
-                # ✅ 若上市沒取到日期，從上櫃補
+                # ✅ 取第一筆有效日期，民國轉西元
                 if actual_date is None and "/" in date_str:
                     parts = date_str.split("/")
                     if len(parts) == 3:
@@ -48,9 +33,22 @@ def get_today_quotes():
     except Exception as e:
         print(f"獲取上櫃今日行情失敗: {e}")
 
-    # ✅ 若 API 都沒有日期欄位，fallback 用程式執行日
+    # 再抓 TWSE（無 Date 欄位，日期已從 TPEX 取得）
+    try:
+        res = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", timeout=15)
+        for item in res.json():
+            code = str(item.get("Code", "")).strip()
+            close = str(item.get("ClosingPrice", "")).replace(',', '')
+            vol = str(item.get("TradeVolume", "")).replace(',', '')
+            if close and vol and close.replace('.', '', 1).isdigit() and len(code) == 4:
+                today_data[code] = {"close": float(close), "volume": float(vol) / 1000}
+    except Exception as e:
+        print(f"獲取上市今日行情失敗: {e}")
+
+    # fallback：TPEX 也沒有日期時才用今天
     if actual_date is None:
         actual_date = tw_today
+        print(f"⚠️ 無法從 API 取得交易日，使用程式執行日: {actual_date}")
 
     return today_data, actual_date
 
@@ -87,7 +85,6 @@ def main():
     with open(DB_FILE, "r", encoding="utf-8") as f:
         db = json.load(f)
 
-    # ✅ get_today_quotes 現在回傳實際交易日
     today_quotes, actual_data_date = get_today_quotes()
     if not today_quotes:
         print("今日無資料或 API 異常，結束更新。")
