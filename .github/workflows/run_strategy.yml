@@ -2,6 +2,7 @@ name: Daily Stock Scanner (V2)
 
 on:
   schedule:
+    - cron: '30 9 * * 1-5'  # UTC 09:30 = 台灣時間 17:30
     - cron: '0 1 * * 2-6'  # 台灣時間 週二~週六 09:00，確保 TWSE/TPEX 已更新前一交易日
   workflow_dispatch:
 
