@@ -1,0 +1,33 @@
+name: Fix Duplicate Data (手動執行)
+
+on:
+  workflow_dispatch:  # 只能手動觸發，不會自動跑
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run fix script
+        run: python fix_duplicate.py
+
+      - name: Commit and push fixed data
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add historical_prices.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Fix: remove duplicate data entries" && git push)
