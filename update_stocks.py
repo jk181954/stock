@@ -13,7 +13,6 @@ FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
 
 
 def parse_tpex_date(date_str):
-    """將 TPEX 民國日期 1150402 轉為西元 2026-04-02"""
     date_str = str(date_str).strip()
     if len(date_str) == 7 and date_str.isdigit():
         year = int(date_str[:3]) + 1911
@@ -24,10 +23,6 @@ def parse_tpex_date(date_str):
 
 
 def get_last_trading_date_from_twse():
-    """
-    防呆：從 TWSE 月曆 API 取得最近的真實交易日。
-    即使今天是假日或休市，也能正確回傳上一個交易日。
-    """
     tw_now = datetime.now(tz=pytz.timezone("Asia/Taipei"))
     for month_offset in range(2):
         check_dt = tw_now - timedelta(days=30 * month_offset)
@@ -40,7 +35,7 @@ def get_last_trading_date_from_twse():
             if not rows:
                 continue
             for row in reversed(rows):
-                date_raw = str(row[0]).strip()  # "115/04/10"
+                date_raw = str(row[0]).strip()
                 parts = date_raw.split("/")
                 if len(parts) == 3:
                     year = int(parts[0]) + 1911
@@ -56,7 +51,6 @@ def get_today_quotes():
     today_data = {}
     actual_date = None
 
-    # ① TPEX 即時報價 + 解析交易日
     try:
         res = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes", timeout=15)
         for item in res.json():
@@ -71,7 +65,6 @@ def get_today_quotes():
     except Exception as e:
         print(f"獲取上櫃今日行情失敗: {e}")
 
-    # ② TWSE 即時報價 + 解析交易日
     try:
         res = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", timeout=15)
         for item in res.json():
@@ -86,7 +79,6 @@ def get_today_quotes():
     except Exception as e:
         print(f"獲取上市今日行情失敗: {e}")
 
-    # ③ 防呆 fallback：查 TWSE 月曆
     if actual_date is None:
         print("⚠️ 無法從即時 API 取得交易日，嘗試查詢 TWSE 月曆...")
         actual_date = get_last_trading_date_from_twse()
@@ -99,17 +91,36 @@ def get_today_quotes():
     return today_data, actual_date
 
 
+def is_data_duplicate(history):
+    """檢查最後一筆是否為重複寫入（close + volume 與前一筆完全相同）"""
+    if len(history) < 2:
+        return False
+    prev = history[-2]
+    last = history[-1]
+    return (round(prev["close"], 2) == round(last["close"], 2) and
+            round(prev["volume"], 2) == round(last["volume"], 2))
+
+
+def clean_duplicate_entries(db, actual_data_date):
+    """清除 DB 中當日的重複資料，還原成前一日狀態，讓程式重新更新"""
+    cleaned = 0
+    for info in db.values():
+        history = info.get("history", [])
+        if (history and history[-1]["date"] == actual_data_date
+                and is_data_duplicate(history)):
+            info["history"] = history[:-1]
+            cleaned += 1
+    return cleaned
+
+
 def fetch_finmind(code, start_date, end_date, token=""):
-    """使用 FinMind 補齊指定股票的缺漏歷史資料"""
     params = {
         "dataset": "TaiwanStockPrice",
         "data_id": code,
         "start_date": start_date,
         "end_date": end_date,
     }
-    headers = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         res = requests.get(FINMIND_API_URL, params=params, headers=headers, timeout=20)
         data = res.json()
@@ -133,18 +144,13 @@ def fetch_finmind(code, start_date, end_date, token=""):
 
 
 def backfill_with_finmind(db, actual_data_date, token=""):
-    """
-    掃描 db，找出仍落後 actual_data_date 的股票（包含資料重複寫入的股票），
-    用 FinMind 補齊正確資料。
-    """
     stale = []
     for code, info in db.items():
         history = info.get("history", [])
         if not history:
             continue
-        last_date = history[-1]["date"]
-        if last_date < actual_data_date:
-            stale.append((code, last_date))
+        if history[-1]["date"] < actual_data_date:
+            stale.append((code, history[-1]["date"]))
 
     if not stale:
         print("✅ 所有股票已是最新，無需 FinMind 補齊。")
@@ -165,7 +171,7 @@ def backfill_with_finmind(db, actual_data_date, token=""):
                 if row["date"] not in existing_dates:
                     db[code]["history"].append(row)
                 else:
-                    # 若日期已存在但資料是舊的（重複寫入問題），用 FinMind 資料覆蓋
+                    # 覆蓋已存在但可能錯誤的資料
                     for j, h in enumerate(db[code]["history"]):
                         if h["date"] == row["date"]:
                             db[code]["history"][j] = row
@@ -220,7 +226,7 @@ def main():
     with open(DB_FILE, "r", encoding="utf-8") as f:
         db = json.load(f)
 
-    # --- STEP 1: TPEX / TWSE 即時 API ---
+    # --- STEP 1: 取得今日交易日與報價 ---
     today_quotes, actual_data_date = get_today_quotes()
 
     if not today_quotes or actual_data_date is None:
@@ -229,17 +235,30 @@ def main():
 
     print(f"API 實際交易日期: {actual_data_date}")
 
-    # 防呆：若大部分股票已是今日日期，視為已更新，跳過
+    # --- STEP 2: 偵測並清除重複寫入的錯誤資料 ---
     already_updated = sum(
         1 for info in db.values()
         if info.get("history") and info["history"][-1]["date"] == actual_data_date
     )
-    if already_updated > len(db) * 0.8:
-        print(f"✅ 已有 {already_updated} 檔資料為 {actual_data_date}，資料已是最新，跳過更新。")
-        return
 
+    if already_updated > len(db) * 0.8:
+        # 大部分已是今日日期，再檢查有沒有重複資料
+        duplicate_count = sum(
+            1 for info in db.values()
+            if info.get("history") and info["history"][-1]["date"] == actual_data_date
+            and is_data_duplicate(info["history"])
+        )
+        if duplicate_count > len(db) * 0.1:
+            print(f"⚠️  偵測到 {duplicate_count} 筆重複寫入（API 未更新），清除後重新更新...")
+            cleaned = clean_duplicate_entries(db, actual_data_date)
+            print(f"   清除 {cleaned} 筆，重新從 API 更新...")
+        else:
+            print(f"✅ 已有 {already_updated} 檔資料為 {actual_data_date}，資料已是最新，跳過更新。")
+            return
+
+    # --- STEP 3: TPEX / TWSE 即時 API 寫入 ---
     updated_count = 0
-    duplicate_skipped = 0  # 資料與前一日完全相同，疑似 API 未更新
+    duplicate_skipped = 0
 
     for code, info in db.items():
         if code not in today_quotes:
@@ -248,7 +267,7 @@ def main():
         new_quote = today_quotes[code]
         history = info["history"]
 
-        # ★ 防呆：今日報價與最後一筆完全相同 → API 尚未更新，跳過（留給 FinMind 補）
+        # 今日報價與最後一筆完全相同 → API 尚未更新，跳過（留給 FinMind 補）
         if history:
             prev = history[-1]
             if (round(prev["close"], 2) == round(new_quote["close"], 2) and
@@ -257,7 +276,6 @@ def main():
                 continue
 
         if history and history[-1]["date"] == actual_data_date:
-            # 同日已存在 → 覆蓋更新
             history[-1] = {"date": actual_data_date, "close": new_quote["close"], "volume": new_quote["volume"]}
         else:
             history.append({"date": actual_data_date, "close": new_quote["close"], "volume": new_quote["volume"]})
@@ -266,9 +284,10 @@ def main():
         updated_count += 1
 
     print(f"TPEX/TWSE 更新完成：{updated_count} 檔")
-    print(f"資料重複跳過（API 未更新）：{duplicate_skipped} 檔，將交由 FinMind 補齊")
+    if duplicate_skipped:
+        print(f"資料重複跳過（API 未更新）：{duplicate_skipped} 檔，將交由 FinMind 補齊")
 
-    # --- STEP 2: FinMind 補齊仍缺漏的股票 ---
+    # --- STEP 4: FinMind 補齊仍缺漏的股票 ---
     finmind_token = os.environ.get("FINMIND_TOKEN", "")
     if finmind_token:
         print("偵測到 FINMIND_TOKEN，啟用 FinMind 補齊...")
@@ -276,7 +295,7 @@ def main():
     else:
         print("未設定 FINMIND_TOKEN，跳過 FinMind 補齊。")
 
-    # --- STEP 3: 計算技術指標 ---
+    # --- STEP 5: 計算技術指標 ---
     all_stocks_result = []
     for code, info in db.items():
         history = info["history"]
@@ -335,7 +354,7 @@ def main():
             "k_value": round(float(k_value), 2),
         })
 
-    # --- STEP 4: 儲存結果 ---
+    # --- STEP 6: 儲存結果 ---
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False)
 
