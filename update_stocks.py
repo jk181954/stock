@@ -1,6 +1,7 @@
 import requests
 import json
 import os
+import time
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -8,6 +9,7 @@ import pytz
 
 DB_FILE = "historical_prices.json"
 OUTPUT_FILE = "all_stocks_data.json"
+FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
 
 
 def parse_tpex_date(date_str):
@@ -23,11 +25,10 @@ def parse_tpex_date(date_str):
 
 def get_last_trading_date_from_twse():
     """
-    防呆：從 TWSE 月交易日曆 API 取得最近的交易日。
-    即使今天是假日或休市，也能正確回傳上一個真實交易日。
+    防呆：從 TWSE 月曆 API 取得最近的真實交易日。
+    即使今天是假日或休市，也能正確回傳上一個交易日。
     """
     tw_now = datetime.now(tz=pytz.timezone("Asia/Taipei"))
-    # 往前最多查 2 個月，確保能找到交易日
     for month_offset in range(2):
         check_dt = tw_now - timedelta(days=30 * month_offset)
         ym = check_dt.strftime("%Y%m")
@@ -35,18 +36,15 @@ def get_last_trading_date_from_twse():
             url = f"https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?date={ym}01&response=json"
             res = requests.get(url, timeout=10)
             data = res.json()
-            # data["data"] 是 [[民國年月日, ...], ...] 的月資料
             rows = data.get("data", [])
             if not rows:
                 continue
-            # 取最後一筆日期（最近交易日），格式如 "115/04/10"
             for row in reversed(rows):
                 date_raw = str(row[0]).strip()  # "115/04/10"
                 parts = date_raw.split("/")
                 if len(parts) == 3:
                     year = int(parts[0]) + 1911
                     candidate = f"{year}-{parts[1]}-{parts[2]}"
-                    # 必須 <= 今天
                     if candidate <= tw_now.strftime("%Y-%m-%d"):
                         return candidate
         except Exception as e:
@@ -58,7 +56,7 @@ def get_today_quotes():
     today_data = {}
     actual_date = None
 
-    # ① 先抓 TPEX，解析實際交易日
+    # ① TPEX 即時報價 + 解析交易日
     try:
         res = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes", timeout=15)
         for item in res.json():
@@ -73,7 +71,7 @@ def get_today_quotes():
     except Exception as e:
         print(f"獲取上櫃今日行情失敗: {e}")
 
-    # ② 再抓 TWSE，同時解析日期
+    # ② TWSE 即時報價 + 解析交易日
     try:
         res = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", timeout=15)
         for item in res.json():
@@ -88,18 +86,98 @@ def get_today_quotes():
     except Exception as e:
         print(f"獲取上市今日行情失敗: {e}")
 
-    # ③ 防呆 fallback：兩個 API 都取不到日期時，查 TWSE 月曆取得最近真實交易日
+    # ③ 防呆 fallback：查 TWSE 月曆
     if actual_date is None:
         print("⚠️ 無法從即時 API 取得交易日，嘗試查詢 TWSE 月曆...")
         actual_date = get_last_trading_date_from_twse()
         if actual_date:
             print(f"✅ 月曆查詢成功，使用最近交易日: {actual_date}")
         else:
-            # 最後手段：往前找 DB 中最新的日期，避免寫入錯誤日期
             print("⚠️ 月曆查詢也失敗，今日可能為非交易日，跳過更新。")
             return {}, None
 
     return today_data, actual_date
+
+
+def fetch_finmind(code, market, start_date, end_date, token=""):
+    """使用 FinMind 補齊指定股票的缺漏歷史資料"""
+    # FinMind 上市用原始代碼，上櫃也相同
+    params = {
+        "dataset": "TaiwanStockPrice",
+        "data_id": code,
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        res = requests.get(FINMIND_API_URL, params=params, headers=headers, timeout=20)
+        data = res.json()
+        if data.get("status") != 200:
+            return []
+        rows = []
+        for item in data.get("data", []):
+            date_val = item.get("date", "")
+            close_val = item.get("close")
+            vol_val = item.get("Trading_Volume")
+            if date_val and close_val is not None:
+                rows.append({
+                    "date": date_val,
+                    "close": round(float(close_val), 2),
+                    "volume": round(float(vol_val) / 1000, 2) if vol_val else 0.0,
+                })
+        return rows
+    except Exception as e:
+        print(f"  [{code}] FinMind 失敗: {e}")
+        return []
+
+
+def backfill_with_finmind(db, actual_data_date, token=""):
+    """
+    掃描 db，找出仍落後 actual_data_date 的股票，用 FinMind 補齊。
+    只補缺漏的股票，不會對已更新的股票發出請求。
+    """
+    stale = []
+    for code, info in db.items():
+        history = info.get("history", [])
+        if not history:
+            continue
+        last_date = history[-1]["date"]
+        if last_date < actual_data_date:
+            stale.append((code, info.get("market", "TWSE"), last_date))
+
+    if not stale:
+        print("✅ 所有股票已是最新，無需 FinMind 補齊。")
+        return db
+
+    print(f"⚙️  FinMind 補齊開始，共 {len(stale)} 檔缺漏...")
+    filled = 0
+    skipped = 0
+    # 有 token 600 req/hr → 每 6 秒；無 token 300 req/hr → 每 12 秒
+    sleep_sec = 6 if token else 12
+
+    for i, (code, market, last_date) in enumerate(stale):
+        start_dt = (datetime.strptime(last_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        new_rows = fetch_finmind(code, market, start_dt, actual_data_date, token=token)
+
+        if new_rows:
+            existing_dates = {r["date"] for r in db[code]["history"]}
+            for row in new_rows:
+                if row["date"] not in existing_dates:
+                    db[code]["history"].append(row)
+            db[code]["history"] = sorted(db[code]["history"], key=lambda x: x["date"])[-250:]
+            filled += 1
+        else:
+            skipped += 1
+
+        if (i + 1) % 50 == 0:
+            print(f"  進度: {i+1}/{len(stale)} | 補齊 {filled} | 無資料 {skipped}")
+
+        time.sleep(sleep_sec)
+
+    print(f"✅ FinMind 補齊完成：成功 {filled} 檔，無資料 {skipped} 檔")
+    return db
 
 
 def is_ma200_up_10days(ma200_list):
@@ -138,16 +216,16 @@ def main():
     with open(DB_FILE, "r", encoding="utf-8") as f:
         db = json.load(f)
 
+    # --- STEP 1: TPEX / TWSE 即時 API ---
     today_quotes, actual_data_date = get_today_quotes()
 
-    # 防呆：actual_data_date 為 None 代表今天非交易日，直接結束
     if not today_quotes or actual_data_date is None:
         print("今日無資料或為非交易日，結束更新。")
         return
 
     print(f"API 實際交易日期: {actual_data_date}")
 
-    # 防呆：若 DB 中已有此日期的資料，且今日報價筆數很少，可能是 API 還未完全更新
+    # 防呆：若大部分股票已是今日日期，視為已更新，跳過
     already_updated = sum(
         1 for info in db.values()
         if info.get("history") and info["history"][-1]["date"] == actual_data_date
@@ -156,20 +234,30 @@ def main():
         print(f"✅ 已有 {already_updated} 檔資料為 {actual_data_date}，資料已是最新，跳過更新。")
         return
 
-    all_stocks_result = []
     updated_count = 0
-
     for code, info in db.items():
         if code in today_quotes:
             new_quote = today_quotes[code]
             if info["history"] and info["history"][-1]["date"] == actual_data_date:
-                # 同一交易日重複執行 → 覆蓋，不重複插入
                 info["history"][-1] = {"date": actual_data_date, "close": new_quote["close"], "volume": new_quote["volume"]}
             else:
                 info["history"].append({"date": actual_data_date, "close": new_quote["close"], "volume": new_quote["volume"]})
             info["history"] = info["history"][-250:]
             updated_count += 1
 
+    print(f"TPEX/TWSE 更新完成：{updated_count} 檔")
+
+    # --- STEP 2: FinMind 補齊仍缺漏的股票 ---
+    finmind_token = os.environ.get("FINMIND_TOKEN", "")
+    if finmind_token:
+        print("偵測到 FINMIND_TOKEN，啟用 FinMind 補齊...")
+        db = backfill_with_finmind(db, actual_data_date, token=finmind_token)
+    else:
+        print("未設定 FINMIND_TOKEN，跳過 FinMind 補齊。")
+
+    # --- STEP 3: 計算技術指標 ---
+    all_stocks_result = []
+    for code, info in db.items():
         history = info["history"]
         if len(history) < 220:
             continue
@@ -185,7 +273,6 @@ def main():
         low20 = closes.rolling(window=20).min()
 
         ma200_up = is_ma200_up_10days(ma200.dropna().tolist())
-
         ma20_today = ma20.iloc[-1]
         ma20_yesterday = ma20.iloc[-2] if len(ma20) > 1 else ma20_today
 
@@ -227,19 +314,18 @@ def main():
             "k_value": round(float(k_value), 2),
         })
 
+    # --- STEP 4: 儲存結果 ---
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False)
 
     tw_tz = pytz.timezone("Asia/Taipei")
     tw_now = datetime.now(tz=tw_tz)
-
     output_data = {
         "updated_at": tw_now.strftime("%Y-%m-%d %H:%M:%S CST"),
         "data_date": actual_data_date,
         "total_valid_stocks": len(all_stocks_result),
         "stocks": all_stocks_result,
     }
-
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(output_data, f, ensure_ascii=False, indent=2)
 
