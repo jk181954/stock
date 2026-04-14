@@ -1,8 +1,8 @@
 name: Daily Stock Scanner (V2)
 
 on:
-  schedule:
-    - cron: '30 10 * * 1-5'  # 台灣時間 週一~週五 18:30，TPEX/TWSE afterTrading 已更新
+#  schedule:
+#    - cron: '30 10 * * 1-5'  # 台灣時間 週一~週五 18:30，TPEX/TWSE afterTrading 已更新
   workflow_dispatch:
 
 permissions:
